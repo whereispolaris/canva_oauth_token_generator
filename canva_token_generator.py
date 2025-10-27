@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import webbrowser
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -144,27 +144,38 @@ class CanvaOAuthApp:
                 col_idx = 0
                 row_idx += 1
         
+        # Token Expiry Display
+        self.expiry_frame = ttk.Frame(main_frame)
+        self.expiry_frame.grid(row=8, column=0, columnspan=2, pady=(10, 0))
+        
+        ttk.Label(self.expiry_frame, text="Token Expires In:", font=('Helvetica', 10, 'bold')).grid(
+            row=0, column=0, padx=5)
+        
+        self.expiry_label = ttk.Label(self.expiry_frame, text="No active token", 
+                                     font=('Helvetica', 12), foreground='#666666')
+        self.expiry_label.grid(row=0, column=1, padx=5)
+        
         # Authorize Button
         authorize_btn = ttk.Button(main_frame, text="1. Authorize App (Opens Browser)", 
                                    command=self.start_authorization)
-        authorize_btn.grid(row=8, column=0, columnspan=2, pady=(20, 5))
+        authorize_btn.grid(row=9, column=0, columnspan=2, pady=(20, 5))
         
         # Exchange Code Button
         self.exchange_btn = ttk.Button(main_frame, text="2. Exchange Code for Token", 
                                        command=self.exchange_code, state='disabled')
-        self.exchange_btn.grid(row=9, column=0, columnspan=2, pady=5)
+        self.exchange_btn.grid(row=10, column=0, columnspan=2, pady=5)
         
         # Response Section
         ttk.Label(main_frame, text="Response:", font=('Helvetica', 11, 'bold')).grid(
-            row=10, column=0, columnspan=2, sticky=tk.W, pady=(20, 5))
+            row=11, column=0, columnspan=2, sticky=tk.W, pady=(20, 5))
         
         self.response_text = scrolledtext.ScrolledText(main_frame, width=85, height=12, 
                                                       wrap=tk.WORD, font=('Courier', 9))
-        self.response_text.grid(row=11, column=0, columnspan=2, pady=5)
+        self.response_text.grid(row=12, column=0, columnspan=2, pady=5)
         
         # Buttons frame
         buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.grid(row=12, column=0, columnspan=2, pady=10)
+        buttons_frame.grid(row=13, column=0, columnspan=2, pady=10)
         
         # Copy Token Button
         self.copy_token_btn = ttk.Button(buttons_frame, text="Copy Access Token", 
@@ -195,6 +206,8 @@ class CanvaOAuthApp:
         self.code_challenge = None
         self.server = None
         self.server_thread = None
+        self.token_expiry_time = None
+        self.expiry_update_job = None
         
     def toggle_secret(self):
         if self.show_secret_var.get():
@@ -207,16 +220,57 @@ class CanvaOAuthApp:
     
     def generate_pkce_pair(self):
         """Generate PKCE code_verifier and code_challenge"""
-        # Generate code verifier (43-128 characters)
         code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8')
-        code_verifier = code_verifier.rstrip('=')  # Remove padding
+        code_verifier = code_verifier.rstrip('=')
         
-        # Generate code challenge (SHA256 hash of verifier)
         code_challenge = hashlib.sha256(code_verifier.encode('utf-8')).digest()
         code_challenge = base64.urlsafe_b64encode(code_challenge).decode('utf-8')
-        code_challenge = code_challenge.rstrip('=')  # Remove padding
+        code_challenge = code_challenge.rstrip('=')
         
         return code_verifier, code_challenge
+    
+    def start_expiry_countdown(self, expires_in):
+        """Start countdown timer for token expiry"""
+        self.token_expiry_time = datetime.now() + timedelta(seconds=expires_in)
+        self.update_expiry_display()
+    
+    def update_expiry_display(self):
+        """Update the expiry countdown display"""
+        if self.expiry_update_job:
+            self.root.after_cancel(self.expiry_update_job)
+        
+        if not self.token_expiry_time:
+            self.expiry_label.config(text="No active token", foreground='#666666')
+            return
+        
+        now = datetime.now()
+        remaining = self.token_expiry_time - now
+        
+        if remaining.total_seconds() <= 0:
+            self.expiry_label.config(text="EXPIRED", foreground='red', 
+                                    font=('Helvetica', 12, 'bold'))
+            self.token_expiry_time = None
+            return
+        
+        # Calculate time remaining
+        hours = int(remaining.total_seconds() // 3600)
+        minutes = int((remaining.total_seconds() % 3600) // 60)
+        seconds = int(remaining.total_seconds() % 60)
+        
+        # Color code based on time remaining
+        if remaining.total_seconds() < 300:  # Less than 5 minutes
+            color = 'red'
+        elif remaining.total_seconds() < 900:  # Less than 15 minutes
+            color = 'orange'
+        else:
+            color = 'green'
+        
+        time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        self.expiry_label.config(text=time_str, foreground=color, 
+                                font=('Helvetica', 12, 'bold'))
+        
+        # Schedule next update
+        self.expiry_update_job = self.root.after(1000, self.update_expiry_display)
     
     def start_authorization(self):
         client_id = self.client_id_entry.get().strip()
@@ -225,17 +279,13 @@ class CanvaOAuthApp:
             messagebox.showerror("Error", "Please enter your Client ID")
             return
         
-        # Generate state for CSRF protection
         self.state = secrets.token_urlsafe(32)
         
-        # Generate PKCE pair if enabled
         if self.use_pkce_var.get():
             self.code_verifier, self.code_challenge = self.generate_pkce_pair()
         
-        # Start local server to handle callback
         self.start_callback_server()
         
-        # Build authorization URL
         scopes = self.get_selected_scopes()
         redirect_uri = self.redirect_uri_var.get()
         
@@ -247,7 +297,6 @@ class CanvaOAuthApp:
             'scope': scopes
         }
         
-        # Add PKCE parameters if enabled
         if self.use_pkce_var.get():
             auth_params['code_challenge'] = self.code_challenge
             auth_params['code_challenge_method'] = 's256'
@@ -266,16 +315,14 @@ class CanvaOAuthApp:
         
         self.response_text.insert(1.0, info_text)
         
-        # Open browser
         webbrowser.open(auth_url)
         
         self.status_var.set("Waiting for authorization in browser...")
     
     def start_callback_server(self):
         if self.server:
-            return  # Server already running
+            return
         
-        # Use 127.0.0.1 instead of localhost to match redirect URI
         self.server = HTTPServer(('127.0.0.1', 8080), OAuthCallbackHandler)
         self.server.auth_code = None
         self.server.auth_error = None
@@ -284,7 +331,6 @@ class CanvaOAuthApp:
             while not self.server.auth_code and not self.server.auth_error:
                 self.server.handle_request()
             
-            # Check for auth code
             if self.server.auth_code:
                 self.auth_code = self.server.auth_code
                 self.root.after(100, self.handle_auth_success)
@@ -347,7 +393,6 @@ class CanvaOAuthApp:
                 "client_secret": client_secret
             }
             
-            # Add code_verifier if PKCE was used
             if self.use_pkce_var.get() and self.code_verifier:
                 payload["code_verifier"] = self.code_verifier
             
@@ -363,6 +408,10 @@ class CanvaOAuthApp:
                 data = response.json()
                 self.access_token = data.get('access_token')
                 self.refresh_token = data.get('refresh_token')
+                expires_in = data.get('expires_in', 3600)
+                
+                # Start expiry countdown
+                self.start_expiry_countdown(expires_in)
                 
                 formatted_response = f"✓ TOKEN EXCHANGE SUCCESSFUL - {timestamp}\n\n"
                 formatted_response += f"Status Code: {response.status_code}\n\n"
@@ -396,13 +445,6 @@ class CanvaOAuthApp:
                 self.status_var.set(f"✗ Error: {response.status_code}")
                 messagebox.showerror("Error", f"Failed to exchange code. Status: {response.status_code}")
                 
-        except requests.exceptions.RequestException as e:
-            error_msg = f"✗ REQUEST ERROR - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n{str(e)}"
-            self.response_text.delete(1.0, tk.END)
-            self.response_text.insert(1.0, error_msg)
-            self.status_var.set("✗ Request failed")
-            messagebox.showerror("Error", f"Request failed: {str(e)}")
-        
         except Exception as e:
             error_msg = f"✗ UNEXPECTED ERROR - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n{str(e)}"
             self.response_text.delete(1.0, tk.END)
@@ -446,9 +488,13 @@ class CanvaOAuthApp:
             if response.status_code == 200:
                 data = response.json()
                 self.access_token = data.get('access_token')
-                # Note: Refresh token might be rotated
                 if 'refresh_token' in data:
                     self.refresh_token = data.get('refresh_token')
+                
+                expires_in = data.get('expires_in', 3600)
+                
+                # Restart expiry countdown
+                self.start_expiry_countdown(expires_in)
                 
                 formatted_response = f"✓ TOKEN REFRESH SUCCESSFUL - {timestamp}\n\n"
                 formatted_response += f"Status Code: {response.status_code}\n\n"
