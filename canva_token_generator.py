@@ -28,7 +28,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             <html>
                 <head><title>Authorization Successful</title></head>
                 <body style="font-family: Arial; text-align: center; padding: 50px;">
-                    <h1 style="color: #00C4CC;">✓ Authorization Successful!</h1>
+                    <h1 style="color: #00C4CC;">Authorization Successful!</h1>
                     <p>You can close this window and return to the app.</p>
                 </body>
             </html>
@@ -342,7 +342,7 @@ class CanvaOAuthApp:
     
     def handle_auth_success(self):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        message = f"✓ AUTHORIZATION SUCCESSFUL - {timestamp}\n\n"
+        message = f"AUTHORIZATION SUCCESSFUL - {timestamp}\n\n"
         message += f"Authorization Code: {self.auth_code[:20]}...\n\n"
         message += "Click 'Exchange Code for Token' to get your access token."
         
@@ -351,7 +351,7 @@ class CanvaOAuthApp:
         self.response_text.tag_add("success", "1.0", "1.end")
         self.response_text.tag_config("success", foreground="green", font=('Courier', 9, 'bold'))
         
-        self.status_var.set("✓ Authorization successful - Ready to exchange code")
+        self.status_var.set("Authorization successful - Ready to exchange code")
         self.exchange_btn.config(state='normal')
     
     def handle_auth_error(self, error):
