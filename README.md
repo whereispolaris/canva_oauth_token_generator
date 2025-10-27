@@ -1,5 +1,3 @@
-Good question! Yeah, I'd add it since macOS users will hit that "externally-managed-environment" error without it. Here's an updated version:
-
 # Canva Connect API - OAuth Token Generator
 
 A simple Python desktop app for generating OAuth access tokens for the Canva Connect API. Perfect for testing integrations, customer demos, and development workflows.
