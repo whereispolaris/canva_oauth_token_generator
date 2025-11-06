@@ -60,8 +60,8 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
 class CanvaOAuthApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Canva Connect API - OAuth Token Generator")
-        self.root.geometry("800x750")
+        self.root.title("Canva MCP - OAuth Token Generator")
+        self.root.geometry("800x650")
         self.root.resizable(False, False)
         
         # Configure style
@@ -73,7 +73,7 @@ class CanvaOAuthApp:
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Title
-        title_label = ttk.Label(main_frame, text="Canva Connect API - OAuth Flow", 
+        title_label = ttk.Label(main_frame, text="Canva MCP - OAuth Flow",
                                 font=('Helvetica', 16, 'bold'))
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 20))
         
@@ -105,48 +105,20 @@ class CanvaOAuthApp:
         redirect_uri_entry.grid(row=4, column=1, pady=5, padx=(10, 0))
         
         # Info label
-        info_label = ttk.Label(main_frame, 
-                              text="Make sure this redirect URI matches your Canva app settings exactly!",
+        info_label = ttk.Label(main_frame,
+                              text="Make sure this redirect URI matches your Canva MCP app settings exactly!",
                               font=('Helvetica', 9, 'italic'), foreground='#666666')
         info_label.grid(row=5, column=0, columnspan=2, pady=(0, 10))
         
         # PKCE Option
         self.use_pkce_var = tk.BooleanVar(value=True)
-        pkce_check = ttk.Checkbutton(main_frame, text="Use PKCE (Recommended)", 
+        pkce_check = ttk.Checkbutton(main_frame, text="Use PKCE (Recommended)",
                                     variable=self.use_pkce_var)
         pkce_check.grid(row=6, column=1, sticky=tk.W, padx=(10, 0))
-        
-        # Scopes
-        ttk.Label(main_frame, text="Scopes:", font=('Helvetica', 11)).grid(
-            row=7, column=0, sticky=tk.W, pady=5)
-        
-        scopes_frame = ttk.Frame(main_frame)
-        scopes_frame.grid(row=7, column=1, sticky=tk.W, padx=(10, 0))
-        
-        self.scope_vars = {
-            'asset:read': tk.BooleanVar(value=True),
-            'asset:write': tk.BooleanVar(value=True),
-            'design:content:read': tk.BooleanVar(value=True),
-            'design:content:write': tk.BooleanVar(value=True),
-            'design:meta:read': tk.BooleanVar(value=True),
-            'folder:read': tk.BooleanVar(value=True),
-            'folder:write': tk.BooleanVar(value=True),
-            'profile:read': tk.BooleanVar(value=True),
-        }
-        
-        row_idx = 0
-        col_idx = 0
-        for scope, var in self.scope_vars.items():
-            cb = ttk.Checkbutton(scopes_frame, text=scope, variable=var)
-            cb.grid(row=row_idx, column=col_idx, sticky=tk.W, padx=(0, 15))
-            col_idx += 1
-            if col_idx > 2:
-                col_idx = 0
-                row_idx += 1
-        
+
         # Token Expiry Display
         self.expiry_frame = ttk.Frame(main_frame)
-        self.expiry_frame.grid(row=8, column=0, columnspan=2, pady=(10, 0))
+        self.expiry_frame.grid(row=7, column=0, columnspan=2, pady=(10, 0))
         
         ttk.Label(self.expiry_frame, text="Token Expires In:", font=('Helvetica', 10, 'bold')).grid(
             row=0, column=0, padx=5)
@@ -214,10 +186,7 @@ class CanvaOAuthApp:
             self.client_secret_entry.config(show="")
         else:
             self.client_secret_entry.config(show="*")
-    
-    def get_selected_scopes(self):
-        return ' '.join([scope for scope, var in self.scope_vars.items() if var.get()])
-    
+
     def generate_pkce_pair(self):
         """Generate PKCE code_verifier and code_challenge"""
         code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8')
@@ -285,23 +254,21 @@ class CanvaOAuthApp:
             self.code_verifier, self.code_challenge = self.generate_pkce_pair()
         
         self.start_callback_server()
-        
-        scopes = self.get_selected_scopes()
+
         redirect_uri = self.redirect_uri_var.get()
-        
+
         auth_params = {
             'client_id': client_id,
             'redirect_uri': redirect_uri,
             'response_type': 'code',
-            'state': self.state,
-            'scope': scopes
+            'state': self.state
         }
         
         if self.use_pkce_var.get():
             auth_params['code_challenge'] = self.code_challenge
-            auth_params['code_challenge_method'] = 's256'
+            auth_params['code_challenge_method'] = 'S256'
         
-        auth_url = f"https://www.canva.com/api/oauth/authorize?{urllib.parse.urlencode(auth_params)}"
+        auth_url = f"https://mcp.canva.com/authorize?{urllib.parse.urlencode(auth_params)}"
         
         self.status_var.set("Opening browser for authorization...")
         self.response_text.delete(1.0, tk.END)
@@ -383,24 +350,23 @@ class CanvaOAuthApp:
         self.root.update()
         
         try:
-            url = "https://api.canva.com/rest/v1/oauth/token"
-            
+            url = "https://mcp.canva.com/token"
+
             payload = {
                 "grant_type": "authorization_code",
                 "code": self.auth_code,
-                "redirect_uri": self.redirect_uri_var.get(),
-                "client_id": client_id,
-                "client_secret": client_secret
+                "redirect_uri": self.redirect_uri_var.get()
             }
-            
+
             if self.use_pkce_var.get() and self.code_verifier:
                 payload["code_verifier"] = self.code_verifier
-            
+
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded"
             }
-            
-            response = requests.post(url, data=payload, headers=headers)
+
+            # MCP requires Basic Auth (client_secret_basic method)
+            response = requests.post(url, data=payload, headers=headers, auth=(client_id, client_secret))
             
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
@@ -468,20 +434,19 @@ class CanvaOAuthApp:
         self.root.update()
         
         try:
-            url = "https://api.canva.com/rest/v1/oauth/token"
-            
+            url = "https://mcp.canva.com/token"
+
             payload = {
                 "grant_type": "refresh_token",
-                "refresh_token": self.refresh_token,
-                "client_id": client_id,
-                "client_secret": client_secret
+                "refresh_token": self.refresh_token
             }
-            
+
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded"
             }
-            
-            response = requests.post(url, data=payload, headers=headers)
+
+            # MCP requires Basic Auth (client_secret_basic method)
+            response = requests.post(url, data=payload, headers=headers, auth=(client_id, client_secret))
             
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
